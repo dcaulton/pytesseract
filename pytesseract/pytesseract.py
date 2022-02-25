@@ -226,6 +226,43 @@ def subprocess_args(include_stdout=True):
     return kwargs
 
 
+async def run_tesseract_async(
+    input_filename,
+    output_filename_base,
+    extension,
+    lang,
+    config='',
+    nice=0,
+    timeout=0,
+):
+    cmd_args = []
+
+    if not sys.platform.startswith('win32') and nice != 0:
+        cmd_args += ('nice', '-n', str(nice))
+
+    cmd_args += (tesseract_cmd, input_filename, output_filename_base)
+
+    if lang is not None:
+        cmd_args += ('-l', lang)
+
+    if config:
+        cmd_args += shlex.split(config)
+
+    if extension and extension not in {'box', 'osd', 'tsv', 'xml'}:
+        cmd_args.append(extension)
+
+    try:
+        proc = subprocess.Popen(cmd_args, **subprocess_args())
+    except OSError as e:
+        if e.errno != ENOENT:
+            raise e
+        raise TesseractNotFoundError()
+
+    with timeout_manager(proc, timeout) as error_string:
+        if proc.returncode:
+            raise TesseractError(proc.returncode, get_errors(error_string))
+
+
 def run_tesseract(
     input_filename,
     output_filename_base,
@@ -262,6 +299,38 @@ def run_tesseract(
     with timeout_manager(proc, timeout) as error_string:
         if proc.returncode:
             raise TesseractError(proc.returncode, get_errors(error_string))
+
+
+async def run_and_get_output_async(
+    image,
+    extension='',
+    lang=None,
+    config='',
+    nice=0,
+    timeout=0,
+    return_bytes=False,
+):
+    import aiofiles
+    with save(image) as (temp_name, input_filename):
+        kwargs = {
+            'input_filename': input_filename,
+            'output_filename_base': temp_name,
+            'extension': extension,
+            'lang': lang,
+            'config': config,
+            'nice': nice,
+            'timeout': timeout,
+        }
+        # TODO make async
+        await run_tesseract_async(**kwargs)
+        filename = kwargs['output_filename_base'] + extsep + extension
+        async with aiofiles.open(filename, mode='rb') as output_file:
+            if return_bytes:
+                resp = await output_file.read()
+                return resp
+            resp = await output_file.read()
+            resp = resp.decode(DEFAULT_ENCODING)
+            return resp
 
 
 def run_and_get_output(
@@ -407,6 +476,28 @@ def get_tesseract_version():
     return version
 
 
+async def image_to_string_async(
+    image,
+    lang=None,
+    config='',
+    nice=0,
+    output_type=Output.STRING,
+    timeout=0,
+):
+    """
+    Returns the result of a Tesseract OCR run on the provided image to string
+    """
+    args = [image, 'txt', lang, config, nice, timeout]
+    if output_type == Output.BYTES:
+        val = await run_and_get_output_async(*(args + [True])),
+        return val
+    elif output_type == Output.DICT:
+        rgo_output = await run_and_get_output_async(*args)
+        return {'text': rgo_output}
+    elif output_type == Output.STRING:
+        val = await run_and_get_output_async(*args)
+        return val
+
 def image_to_string(
     image,
     lang=None,
@@ -456,7 +547,6 @@ def image_to_alto_xml(
     """
     Returns the result of a Tesseract OCR run on the provided image to ALTO XML
     """
-
     if get_tesseract_version() < TESSERACT_ALTO_VERSION:
         raise ALTONotSupported()
 
@@ -502,6 +592,41 @@ def get_pandas_output(args, config=None):
         pass
 
     return pd.read_csv(BytesIO(run_and_get_output(*args)), **kwargs)
+
+
+async def image_to_data_async(
+    image,
+    lang=None,
+    config='',
+    nice=0,
+    output_type=Output.STRING,
+    timeout=0,
+    pandas_config=None,
+):
+    """
+    Returns string containing box boundaries, confidences,
+    and other information. Requires Tesseract 3.05+
+    """
+
+    if get_tesseract_version() < '3.05':
+        raise TSVNotSupported()
+
+    config = f'-c tessedit_create_tsv=1 {config.strip()}'
+    args = [image, 'tsv', lang, config, nice, timeout]
+
+    if output_type == Output.BYTES:
+        val = await run_and_get_output_async(*(args + [True])),
+        return val
+    elif output_type == Output.DATAFRAME:
+        print('dataframes not yet supported for pytesseract async')
+        return
+    elif output_type == Output.DICT:
+        rgo_output = await run_and_get_output_async(*args)
+        text_val = file_to_dict(rgo_output, '\t', -1)
+        return {'text': rgo_output}
+    elif output_type == Output.STRING:
+        val = await run_and_get_output_async(*args)
+        return val
 
 
 def image_to_data(
