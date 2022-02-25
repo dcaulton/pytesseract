@@ -608,7 +608,7 @@ async def image_to_data_async(
     and other information. Requires Tesseract 3.05+
     """
 
-    if get_tesseract_version() < '3.05':
+    if get_tesseract_version() < TESSERACT_MIN_VERSION:
         raise TSVNotSupported()
 
     config = f'-c tessedit_create_tsv=1 {config.strip()}'
