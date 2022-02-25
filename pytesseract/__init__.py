@@ -5,9 +5,11 @@ from .pytesseract import get_tesseract_version
 from .pytesseract import image_to_alto_xml
 from .pytesseract import image_to_boxes
 from .pytesseract import image_to_data
+from .pytesseract import image_to_data_async
 from .pytesseract import image_to_osd
 from .pytesseract import image_to_pdf_or_hocr
 from .pytesseract import image_to_string
+from .pytesseract import image_to_string_async
 from .pytesseract import Output
 from .pytesseract import run_and_get_output
 from .pytesseract import TesseractError
