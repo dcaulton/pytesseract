@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+import asyncio
+from asyncio.subprocess import Process
 import re
 import shlex
 import string
@@ -252,15 +254,14 @@ async def run_tesseract_async(
         cmd_args.append(extension)
 
     try:
-        proc = subprocess.Popen(cmd_args, **subprocess_args())
-    except OSError as e:
-        if e.errno != ENOENT:
-            raise e
-        raise TesseractNotFoundError()
-
-    with timeout_manager(proc, timeout) as error_string:
-        if proc.returncode:
-            raise TesseractError(proc.returncode, get_errors(error_string))
+        process: Process = await asyncio.create_subprocess_exec(
+            *cmd_args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout_data, stderr_data= await process.communicate()
+    except Exception as e:
+        raise TesseractError(e)
 
 
 def run_tesseract(
@@ -321,7 +322,6 @@ async def run_and_get_output_async(
             'nice': nice,
             'timeout': timeout,
         }
-        # TODO make async
         await run_tesseract_async(**kwargs)
         filename = kwargs['output_filename_base'] + extsep + extension
         async with aiofiles.open(filename, mode='rb') as output_file:
